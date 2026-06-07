@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bronya/ddddocr-go"
+	"github.com/KazemiyaMione/ddddocr-go"
 )
 
 func main() {

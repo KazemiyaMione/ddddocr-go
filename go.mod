@@ -1,4 +1,4 @@
-module github.com/bronya/ddddocr-go
+module github.com/KazemiyaMione/ddddocr-go
 
 go 1.26.4
 

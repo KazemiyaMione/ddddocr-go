@@ -15,7 +15,7 @@ Uses the same `common.onnx` and `common_old.onnx` models from the Python library
 ## Installation
 
 ```bash
-go get github.com/bronya/ddddocr-go
+go get github.com/KazemiyaMione/ddddocr-go
 ```
 
 ## Quick Start
@@ -27,7 +27,7 @@ import (
     "fmt"
     "os"
 
-    "github.com/bronya/ddddocr-go"
+    "github.com/KazemiyaMione/ddddocr-go"
 )
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 
 ```bash
 # Build CLI
-go install github.com/bronya/ddddocr-go/cmd/ddddocr@latest
+go install github.com/KazemiyaMione/ddddocr-go/cmd/ddddocr@latest
 
 # Use default (old) model
 ddddocr captcha.png
