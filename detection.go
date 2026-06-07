@@ -59,9 +59,9 @@ func preprocDet(img image.Image) ([]float32, float64) {
 	newW := int(float64(origW) * r)
 	newH := int(float64(origH) * r)
 
-	// 缩放图片
+	// 缩放图片（Bilinear，对应 Python 的 cv2.INTER_LINEAR）
 	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.CatmullRom.Scale(resized, resized.Bounds(), img, img.Bounds(), draw.Over, nil)
+	draw.BiLinear.Scale(resized, resized.Bounds(), img, img.Bounds(), draw.Over, nil)
 
 	// 创建 416x416 填充画布（CHW 顺序，填充值 114）
 	padded := make([]float32, 3*inputSize*inputSize)
@@ -72,13 +72,13 @@ func preprocDet(img image.Image) ([]float32, float64) {
 		}
 	}
 
-	// 将缩放后的图片复制到填充画布
+	// 将缩放后的图片复制到填充画布（BGR 顺序，对应 Python 的 cv2.imdecode）
 	for y := 0; y < newH; y++ {
 		for x := 0; x < newW; x++ {
 			cr, cg, cb, _ := resized.At(x, y).RGBA()
-			padded[0*inputSize*inputSize+y*inputSize+x] = float32(cr >> 8)
-			padded[1*inputSize*inputSize+y*inputSize+x] = float32(cg >> 8)
-			padded[2*inputSize*inputSize+y*inputSize+x] = float32(cb >> 8)
+			padded[0*inputSize*inputSize+y*inputSize+x] = float32(cb >> 8) // B
+			padded[1*inputSize*inputSize+y*inputSize+x] = float32(cg >> 8) // G
+			padded[2*inputSize*inputSize+y*inputSize+x] = float32(cr >> 8) // R
 		}
 	}
 
@@ -224,7 +224,7 @@ func nmsFilter(candidates []nmsCandidate, threshold float64) []int {
 		indices = indices[1:]
 
 		bestBox := candidates[best].box
-		bestArea := (bestBox[2] - bestBox[0]) * (bestBox[3] - bestBox[1])
+		bestArea := (bestBox[2] - bestBox[0] + 1) * (bestBox[3] - bestBox[1] + 1)
 
 		var remaining []int
 		for _, idx := range indices {
@@ -235,11 +235,11 @@ func nmsFilter(candidates []nmsCandidate, threshold float64) []int {
 			xx2 := minf(bestBox[2], box[2])
 			yy2 := minf(bestBox[3], box[3])
 
-			iw := maxf(0, xx2-xx1)
-			ih := maxf(0, yy2-yy1)
+			iw := maxf(0, xx2-xx1+1)
+			ih := maxf(0, yy2-yy1+1)
 			inter := iw * ih
 
-			area := (box[2] - box[0]) * (box[3] - box[1])
+			area := (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
 			iou := inter / (bestArea + area - inter)
 
 			if iou <= threshold {
