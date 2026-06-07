@@ -1,24 +1,32 @@
 # ddddocr-go
 
-Go port of [ddddocr](https://github.com/sml2h3/ddddocr) — captcha OCR recognition using ONNX models.
+[ddddocr](https://github.com/sml2h3/ddddocr) 的 Go 语言移植版，基于 ONNX 模型实现验证码识别。
 
-Uses the same `common.onnx` and `common_old.onnx` models from the Python library for text recognition from captcha images.
+## 功能
 
-## Requirements
+| 功能 | 方法 | 模型 |
+|------|------|------|
+| OCR 文字识别 | `Classify()` | `common_old.onnx` / `common.onnx` |
+| 目标检测 | `Detection()` | `common_det.onnx` |
+| 滑块匹配 | `SlideMatch()` / `SlideComparison()` | 纯算法，无需模型 |
 
-- **Go 1.21+**
-- **ONNX Runtime** shared library installed on your system
-  - **Windows**: Download `onnxruntime-win-x64-1.x.x.zip` from [ONNX Runtime releases](https://github.com/microsoft/onnxruntime/releases), extract `onnxruntime.dll`
-  - **Linux**: `libonnxruntime.so` (install via package manager or download)
-  - **macOS**: `libonnxruntime.dylib`
+## 安装
 
-## Installation
+### 1. 安装 ONNX Runtime
+
+从 [ONNX Runtime Releases](https://github.com/microsoft/onnxruntime/releases/tag/v1.25.0) 下载对应系统的动态库：
+
+- Windows: `onnxruntime-win-x64-1.25.0.zip` → 解压得到 `onnxruntime.dll`
+- Linux: `onnxruntime-linux-x64-1.25.0.tgz` → `libonnxruntime.so`
+- macOS: `onnxruntime-osx-universal2-1.25.0.tgz` → `libonnxruntime.dylib`
+
+### 2. 引入库
 
 ```bash
-go get github.com/KazemiyaMione/ddddocr-go
+go get github.com/KazemiyaMione/ddddocr-go@latest
 ```
 
-## Quick Start
+## 快速开始
 
 ```go
 package main
@@ -26,96 +34,100 @@ package main
 import (
     "fmt"
     "os"
-
     "github.com/KazemiyaMione/ddddocr-go"
 )
 
 func main() {
-    // Read image
-    imgData, _ := os.ReadFile("captcha.png")
-
-    // Create OCR engine (uses old model by default)
-    ocr, err := ddddocr.New(nil)
+    opts := &ddddocr.Options{
+        OnnxRuntimeLibPath: "./onnxruntime.dll",
+    }
+    ocr, err := ddddocr.New(opts)
     if err != nil {
         panic(err)
     }
     defer ocr.Close()
 
-    // Recognize
-    result, _ := ocr.Classify(imgData)
+    data, _ := os.ReadFile("captcha.png")
+    result, _ := ocr.Classify(data)
     fmt.Println(result)
 }
 ```
 
-## CLI Tool
-
-```bash
-# Build CLI
-go install github.com/KazemiyaMione/ddddocr-go/cmd/ddddocr@latest
-
-# Use default (old) model
-ddddocr captcha.png
-
-# Use beta model
-ddddocr --beta captcha.png
-
-# With PNG transparent background fix
-ddddocr --pngfix captcha.png
-```
-
-## API
-
-### Options
+## OCR 文字识别
 
 ```go
-opts := &ddddocr.Options{
-    Old:                false,  // Use old model (common_old.onnx)
-    Beta:               true,   // Use beta model (common.onnx)
-    ModelPath:          "",     // Custom ONNX model path
-    CharsetPath:        "",     // Custom charset JSON path
-    OnnxRuntimeLibPath: "",     // Override ONNX Runtime library path
+// 默认旧版模型
+ocr, _ := ddddocr.New(nil)
+
+// 新版模型
+ocr, _ := ddddocr.New(&ddddocr.Options{Beta: true})
+
+// 识别
+result, _ := ocr.Classify(imageBytes)
+
+// PNG 透明背景修复
+result, _ := ocr.ClassifyWithPNGFix(imageBytes, true)
+```
+
+## 目标检测
+
+```go
+ocr, _ := ddddocr.New(&ddddocr.Options{Det: true})
+
+boxes, _ := ocr.Detection(imageBytes)
+for _, b := range boxes {
+    // b = [x1, y1, x2, y2] 左上角和右下角坐标
+    fmt.Printf("检测到目标: (%d,%d) -> (%d,%d)\n", b[0], b[1], b[2], b[3])
 }
 ```
 
-### Methods
+## 滑块匹配
 
-- `New(opts *Options) (*DdddOcr, error)` — Create OCR engine
-- `Classify(imgData []byte) (string, error)` — Recognize text from image bytes
-- `ClassifyWithPNGFix(imgData []byte, pngFix bool) (string, error)` — With PNG alpha fix
-- `Close() error` — Release resources
-- `GetCharset() []string` — Get the character set
-- `IsInitialized() bool` — Check if ready
+```go
+ocr, _ := ddddocr.New(nil)
 
-## Models
+// 边缘检测匹配（推荐）
+result, _ := ocr.SlideMatch(sliderBytes, backgroundBytes, false)
 
-| Model | File | Charset | Description |
-|-------|------|---------|-------------|
-| Default (Old) | `common_old.onnx` | CHARSET_OLD (8210 chars) | Standard captcha recognition |
-| Beta | `common.onnx` | CHARSET_BETA (8210 chars) | Newer trained model |
+// 简单模板匹配
+result, _ := ocr.SlideMatch(sliderBytes, backgroundBytes, true)
 
-Both models accept:
-- **Input**: `(1, 1, 64, image_width)` grayscale float32 [0,1]
-- **Output**: `(seqlen, 1, 8210)` CTC logits
+// 缺口对比
+result, _ := ocr.SlideComparison(gapImageBytes, fullImageBytes)
 
-## Image Preprocessing
+fmt.Println(result.TargetX, result.TargetY) // 滑块中心坐标
+fmt.Println(result.Confidence)               // 置信度 0-1
+```
 
-1. Decode image (PNG, JPEG, BMP, GIF, TIFF)
-2. Convert to grayscale
-3. Resize: height=64px, width scaled proportionally (bilinear)
-4. Normalize: divide by 255.0
-5. Reshape to NCHW format `(1, 1, 64, width)`
+## Options 参数
 
-## CTC Decoding
+```go
+type Options struct {
+    Old    bool   // 旧版 OCR 模型（默认）
+    Beta   bool   // 新版 OCR 模型
+    Det    bool   // 目标检测模式
+    ModelPath    string // 自定义 ONNX 模型路径
+    CharsetPath  string // 自定义字符集 JSON 路径（仅 OCR）
+    OnnxRuntimeLibPath string // ONNX Runtime 动态库路径
+}
+```
 
-1. argmax per timestep along class dimension
-2. Remove consecutive duplicate predictions
-3. Skip blank label (index 0)
-4. Map remaining indices to character set characters
+## 环境变量
 
-## License
+```bash
+# 设置 ONNX Runtime 库路径（优先级低于 Options.OnnxRuntimeLibPath）
+export ONNXRUNTIME_LIB_PATH=/path/to/onnxruntime.dll
+```
 
-Same as the original ddddocr project.
+## 与 Python 版对比
 
-## Credits
+| 测试项 | Python | Go |
+|--------|--------|-----|
+| OCR 识别 | ✓ | ✓ 完全一致 |
+| 目标检测 (PNG) | ✓ | ✓ 1px 误差 |
+| 目标检测 (JPG) | ✓ | 建议转 PNG |
+| 滑块匹配 | ✓ | ✓ |
 
-Based on [sml2h3/ddddocr](https://github.com/sml2h3/ddddocr) — the original Python implementation.
+## 许可
+
+MIT License（与原始 ddddocr 项目一致）

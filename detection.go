@@ -5,10 +5,9 @@ import (
 	_ "embed"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"sort"
-
-	"golang.org/x/image/draw"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -20,6 +19,21 @@ var commonDetOnnxData []byte
 type nmsCandidate struct {
 	box   [4]float64
 	score float64
+}
+
+// DetectionDebug 调试用：返回原始模型输出和预处理数据以供对比。
+func (ocr *DdddOcr) DetectionDebug(imgData []byte) (input []float32, output []float32, ratio float64, origW, origH int, err error) {
+	img, _, e := image.Decode(bytes.NewReader(imgData))
+	if e != nil {
+		err = fmt.Errorf("图片解码失败: %w", e)
+		return
+	}
+
+	input, ratio = preprocDet(img)
+	origW = img.Bounds().Dx()
+	origH = img.Bounds().Dy()
+	output, err = runDetInference(ocr.detSession, input)
+	return
 }
 
 // Detection 对图片进行目标检测，返回检测到的边界框列表。
@@ -53,36 +67,107 @@ func preprocDet(img image.Image) ([]float32, float64) {
 	origW := img.Bounds().Dx()
 	origH := img.Bounds().Dy()
 
-	// 计算缩放比例
 	r := float64(inputSize) / float64(max(origH, origW))
 
 	newW := int(float64(origW) * r)
 	newH := int(float64(origH) * r)
 
-	// 缩放图片（Bilinear，对应 Python 的 cv2.INTER_LINEAR）
-	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.BiLinear.Scale(resized, resized.Bounds(), img, img.Bounds(), draw.Over, nil)
+	// 手动 Bilinear，对齐 OpenCV cv2.INTER_LINEAR 的半像素偏移
+	resized := resizeBilinearOCV(img, newW, newH)
 
 	// 创建 416x416 填充画布（CHW 顺序，填充值 114）
 	padded := make([]float32, 3*inputSize*inputSize)
-	for c := 0; c < 3; c++ {
-		offset := c * inputSize * inputSize
-		for i := 0; i < inputSize*inputSize; i++ {
-			padded[offset+i] = 114.0
-		}
+	for i := range padded {
+		padded[i] = 114.0
 	}
 
-	// 将缩放后的图片复制到填充画布（BGR 顺序，对应 Python 的 cv2.imdecode）
+	// BGR 顺序贴入（匹配 Python cv2.imdecode 输出）
 	for y := 0; y < newH; y++ {
+		rowOff := y * inputSize
 		for x := 0; x < newW; x++ {
 			cr, cg, cb, _ := resized.At(x, y).RGBA()
-			padded[0*inputSize*inputSize+y*inputSize+x] = float32(cb >> 8) // B
-			padded[1*inputSize*inputSize+y*inputSize+x] = float32(cg >> 8) // G
-			padded[2*inputSize*inputSize+y*inputSize+x] = float32(cr >> 8) // R
+			padded[0*inputSize*inputSize+rowOff+x] = float32(cb >> 8) // B
+			padded[1*inputSize*inputSize+rowOff+x] = float32(cg >> 8) // G
+			padded[2*inputSize*inputSize+rowOff+x] = float32(cr >> 8) // R
 		}
 	}
 
 	return padded, r
+}
+
+// resizeBilinearOCV 手动 bilinear 缩放，使用 OpenCV 的半像素偏移公式：
+//
+//	src_x = (dst_x + 0.5) / scale - 0.5
+//	src_y = (dst_y + 0.5) / scale - 0.5
+//
+// 超出边界时 clamp 到边沿像素。
+func resizeBilinearOCV(img image.Image, dstW, dstH int) *image.RGBA {
+	bounds := img.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+	offX := bounds.Min.X
+	offY := bounds.Min.Y
+
+	scaleX := float64(srcW) / float64(dstW)
+	scaleY := float64(srcH) / float64(dstH)
+
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+
+	for dy := 0; dy < dstH; dy++ {
+		sy := (float64(dy)+0.5)*scaleY - 0.5
+		sy0 := int(math.Floor(sy))
+		sy1 := sy0 + 1
+		if sy0 < 0 {
+			sy0 = 0
+		}
+		if sy1 >= srcH {
+			sy1 = srcH - 1
+		}
+		fy := sy - float64(sy0)
+
+		for dx := 0; dx < dstW; dx++ {
+			sx := (float64(dx)+0.5)*scaleX - 0.5
+			sx0 := int(math.Floor(sx))
+			sx1 := sx0 + 1
+			if sx0 < 0 {
+				sx0 = 0
+			}
+			if sx1 >= srcW {
+				sx1 = srcW - 1
+			}
+			fx := sx - float64(sx0)
+
+			r00, g00, b00, _ := img.At(sx0+offX, sy0+offY).RGBA()
+			r10, g10, b10, _ := img.At(sx1+offX, sy0+offY).RGBA()
+			r01, g01, b01, _ := img.At(sx0+offX, sy1+offY).RGBA()
+			r11, g11, b11, _ := img.At(sx1+offX, sy1+offY).RGBA()
+
+			topR := (1-fx)*float64(r00) + fx*float64(r10)
+			botR := (1-fx)*float64(r01) + fx*float64(r11)
+			topG := (1-fx)*float64(g00) + fx*float64(g10)
+			botG := (1-fx)*float64(g01) + fx*float64(g11)
+			topB := (1-fx)*float64(b00) + fx*float64(b10)
+			botB := (1-fx)*float64(b01) + fx*float64(b11)
+
+			rv := uint8(uint16(clampF((1-fy)*topR+fy*botR, 0, 65535)) >> 8)
+			gv := uint8(uint16(clampF((1-fy)*topG+fy*botG, 0, 65535)) >> 8)
+			bv := uint8(uint16(clampF((1-fy)*topB+fy*botB, 0, 65535)) >> 8)
+
+			dst.SetRGBA(dx, dy, color.RGBA{R: rv, G: gv, B: bv, A: 255})
+		}
+	}
+
+	return dst
+}
+
+func clampF(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // runDetInference 运行检测模型推理。
