@@ -9,33 +9,33 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: basic_ocr <image_path>\n")
+		fmt.Fprintf(os.Stderr, "用法: basic_ocr <图片路径>\n")
 		os.Exit(1)
 	}
 
 	imagePath := os.Args[1]
 
-	// Read image file
+	// 读取图片文件
 	imgData, err := os.ReadFile(imagePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading image: %v\n", err)
+		fmt.Fprintf(os.Stderr, "读取图片失败: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create OCR engine (default: old model)
+	// 创建 OCR 引擎（默认使用旧版模型）
 	ocr, err := ddddocr.New(nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating OCR engine: %v\n", err)
+		fmt.Fprintf(os.Stderr, "创建 OCR 引擎失败: %v\n", err)
 		os.Exit(1)
 	}
 	defer ocr.Close()
 
-	// Recognize text
+	// 识别文字
 	result, err := ocr.Classify(imgData)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error recognizing text: %v\n", err)
+		fmt.Fprintf(os.Stderr, "识别失败: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("Result:", result)
+	fmt.Println("结果:", result)
 }

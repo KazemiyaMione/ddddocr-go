@@ -1,11 +1,11 @@
-// Command ddddocr is a CLI tool for OCR-based captcha recognition.
+// Command ddddocr 是基于 ONNX 模型的验证码 OCR 命令行工具。
 //
-// Usage:
+// 用法：
 //
-//	ddddocr <image_path>
-//	ddddocr --beta <image_path>
-//	ddddocr --old <image_path>
-//	ddddocr --model <model_path> --charset <charset_path> <image_path>
+//	ddddocr <图片路径>
+//	ddddocr --beta <图片路径>
+//	ddddocr --old <图片路径>
+//	ddddocr --model <模型路径> --charset <字符集路径> <图片路径>
 package main
 
 import (
@@ -26,31 +26,31 @@ func main() {
 		libPath string
 	)
 
-	flag.BoolVar(&beta, "beta", false, "Use beta/new model (common.onnx)")
-	flag.BoolVar(&old, "old", false, "Use old model (common_old.onnx, default)")
-	flag.StringVar(&model, "model", "", "Path to custom ONNX model")
-	flag.StringVar(&charset, "charset", "", "Path to custom charset JSON file")
-	flag.BoolVar(&pngFix, "pngfix", false, "Fix PNG transparent background (composite over white)")
-	flag.StringVar(&libPath, "lib", "", "Path to ONNX Runtime shared library")
+	flag.BoolVar(&beta, "beta", false, "使用新版模型 common.onnx")
+	flag.BoolVar(&old, "old", false, "使用旧版模型 common_old.onnx（默认）")
+	flag.StringVar(&model, "model", "", "自定义 ONNX 模型文件路径")
+	flag.StringVar(&charset, "charset", "", "自定义字符集 JSON 文件路径")
+	flag.BoolVar(&pngFix, "pngfix", false, "修复 PNG 透明背景（合成到白色背景上）")
+	flag.StringVar(&libPath, "lib", "", "ONNX Runtime 动态库路径")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: ddddocr [flags] <image_path>\n")
+		fmt.Fprintf(os.Stderr, "用法: ddddocr [参数] <图片路径>\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
 	imagePath := args[0]
 
-	// Read image file
+	// 读取图片文件
 	imgData, err := os.ReadFile(imagePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading image file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "读取图片文件失败: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create OCR engine
+	// 创建 OCR 引擎
 	opts := &ddddocr.Options{
 		Old:                old,
 		Beta:               beta,
@@ -60,15 +60,15 @@ func main() {
 	}
 	ocr, err := ddddocr.New(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing OCR engine: %v\n", err)
+		fmt.Fprintf(os.Stderr, "初始化 OCR 引擎失败: %v\n", err)
 		os.Exit(1)
 	}
 	defer ocr.Close()
 
-	// Run recognition
+	// 执行识别
 	result, err := ocr.ClassifyWithPNGFix(imgData, pngFix)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error during OCR: %v\n", err)
+		fmt.Fprintf(os.Stderr, "识别失败: %v\n", err)
 		os.Exit(1)
 	}
 

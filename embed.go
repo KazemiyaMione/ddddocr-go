@@ -18,20 +18,19 @@ var charsetOldJSON []byte
 //go:embed models/charset_beta.json
 var charsetBetaJSON []byte
 
-// charsetCache holds parsed charsets
+// charsetCache 缓存已解析的字符集。
 var charsetCache = map[string][]string{}
 
 func init() {
-	// Parse charsets at init time
 	old, err := parseCharsetJSON(charsetOldJSON)
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse charset_old.json: %v", err))
+		panic(fmt.Sprintf("解析 charset_old.json 失败: %v", err))
 	}
 	charsetCache["old"] = old
 
 	beta, err := parseCharsetJSON(charsetBetaJSON)
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse charset_beta.json: %v", err))
+		panic(fmt.Sprintf("解析 charset_beta.json 失败: %v", err))
 	}
 	charsetCache["beta"] = beta
 }
@@ -44,7 +43,7 @@ func parseCharsetJSON(data []byte) ([]string, error) {
 	return charset, nil
 }
 
-// getCharset returns the charset for the given model type
+// getCharset 返回指定模型类型对应的字符集。
 func getCharset(old bool, beta bool) []string {
 	if beta {
 		return charsetCache["beta"]
@@ -52,7 +51,7 @@ func getCharset(old bool, beta bool) []string {
 	return charsetCache["old"]
 }
 
-// getModelData returns the ONNX model data for the given model type
+// getModelData 返回指定模型类型对应的 ONNX 模型数据。
 func getModelData(old bool, beta bool) []byte {
 	if beta {
 		return commonOnnxData

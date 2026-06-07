@@ -1,9 +1,9 @@
-// Package ddddocr provides OCR-based captcha recognition using ONNX models.
+// Package ddddocr 基于 ONNX 模型提供验证码 OCR 识别功能。
 //
-// It is a Go port of the Python ddddocr library, using the same common.onnx
-// and common_old.onnx models for text recognition from images.
+// 这是 Python ddddocr 库的 Go 移植版本，使用相同的 common.onnx
+// 和 common_old.onnx 模型进行图片文字识别。
 //
-// Basic usage:
+// 基本用法：
 //
 //	ocr := ddddocr.New(nil)
 //	defer ocr.Close()
@@ -24,10 +24,10 @@ var (
 	initErr  error
 )
 
-// initializeORT initializes ONNX Runtime. Safe to call multiple times.
+// initializeORT 初始化 ONNX Runtime 环境，可安全重复调用。
 func initializeORT(libPath string) {
 	initOnce.Do(func() {
-		// Resolve relative path to absolute before passing to ONNX Runtime C API
+		// 将相对路径转为绝对路径再传给 ONNX Runtime C API
 		resolvePath := func(p string) string {
 			abs, err := filepath.Abs(p)
 			if err == nil {
@@ -45,22 +45,21 @@ func initializeORT(libPath string) {
 	})
 }
 
-// Options configures the OCR engine.
+// Options 配置 OCR 引擎的参数。
 type Options struct {
-	// Old uses the old model (common_old.onnx). This is the default if Beta is also false.
+	// Old 使用旧版模型 common_old.onnx（Beta 为 false 时的默认值）。
 	Old bool
-	// Beta uses the beta/new model (common.onnx). Takes precedence over Old.
+	// Beta 使用新版模型 common.onnx，优先级高于 Old。
 	Beta bool
-	// ModelPath specifies a custom ONNX model file path. If set, Old/Beta are ignored.
+	// ModelPath 自定义 ONNX 模型文件路径。设置后 Old/Beta 被忽略。
 	ModelPath string
-	// CharsetPath specifies a custom charset JSON file path.
+	// CharsetPath 自定义字符集 JSON 文件路径。
 	CharsetPath string
-	// OnnxRuntimeLibPath specifies the path to the ONNX Runtime shared library.
-	// If empty, auto-detection is attempted.
+	// OnnxRuntimeLibPath ONNX Runtime 动态库路径。为空时自动检测。
 	OnnxRuntimeLibPath string
 }
 
-// DdddOcr is the main OCR engine.
+// DdddOcr 是 OCR 识别引擎主体。
 type DdddOcr struct {
 	options     Options
 	charset     []string
@@ -68,67 +67,67 @@ type DdddOcr struct {
 	initialized bool
 }
 
-// New creates a new DdddOcr instance with the given options.
-// If opts is nil, defaults are used (old model).
+// New 创建一个新的 DdddOcr 实例。
+// opts 为 nil 时使用默认配置（旧版模型）。
 func New(opts *Options) (*DdddOcr, error) {
 	if opts == nil {
 		opts = &Options{}
 	}
 
-	// Initialize ONNX Runtime (path from Options or ONNXRUNTIME_LIB_PATH env var)
+	// 初始化 ONNX Runtime（路径来自 Options 或 ONNXRUNTIME_LIB_PATH 环境变量）
 	initializeORT(opts.OnnxRuntimeLibPath)
 	if initErr != nil {
-		return nil, fmt.Errorf("failed to initialize ONNX Runtime: %w", initErr)
+		return nil, fmt.Errorf("ONNX Runtime 初始化失败: %w", initErr)
 	}
 
 	ocr := &DdddOcr{
 		options: *opts,
 	}
 
-	// Determine charset
+	// 确定字符集
 	if opts.CharsetPath != "" {
 		charsetData, err := os.ReadFile(opts.CharsetPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read charset file: %w", err)
+			return nil, fmt.Errorf("读取字符集文件失败: %w", err)
 		}
 		var err2 error
 		ocr.charset, err2 = parseCharsetJSON(charsetData)
 		if err2 != nil {
-			return nil, fmt.Errorf("failed to parse charset: %w", err2)
+			return nil, fmt.Errorf("解析字符集失败: %w", err2)
 		}
 	} else {
 		ocr.charset = getCharset(opts.Old, opts.Beta)
 	}
 
 	if len(ocr.charset) == 0 {
-		return nil, fmt.Errorf("charset is empty")
+		return nil, fmt.Errorf("字符集为空")
 	}
 
-	// Load ONNX model
+	// 加载 ONNX 模型
 	var modelData []byte
 	if opts.ModelPath != "" {
 		var err error
 		modelData, err = os.ReadFile(opts.ModelPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read model file: %w", err)
+			return nil, fmt.Errorf("读取模型文件失败: %w", err)
 		}
 	} else {
 		modelData = getModelData(opts.Old, opts.Beta)
 	}
 
 	if len(modelData) == 0 {
-		return nil, fmt.Errorf("model data is empty")
+		return nil, fmt.Errorf("模型数据为空")
 	}
 
-	// Create dynamic session (supports variable input/output shapes)
+	// 创建动态会话（支持可变输入输出形状）
 	session, err := ort.NewDynamicAdvancedSessionWithONNXData(
 		modelData,
-		[]string{"input1"}, // input names
-		[]string{"387"},    // output names
-		nil,                // use default session options (CPU)
+		[]string{"input1"}, // 输入节点名
+		[]string{"387"},    // 输出节点名
+		nil,                // 使用默认会话选项（CPU）
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ONNX session: %w", err)
+		return nil, fmt.Errorf("创建 ONNX 会话失败: %w", err)
 	}
 	ocr.session = session
 	ocr.initialized = true
@@ -136,59 +135,57 @@ func New(opts *Options) (*DdddOcr, error) {
 	return ocr, nil
 }
 
-// Classify performs OCR on the given image data.
-// The image can be in PNG, JPEG, BMP, GIF, or TIFF format.
+// Classify 对图片进行 OCR 识别。
+// 图片支持 PNG、JPEG、BMP、GIF、TIFF 格式。
 //
-// Returns the recognized text.
+// 返回识别的文字。
 func (ocr *DdddOcr) Classify(imgData []byte) (string, error) {
 	return ocr.ClassifyWithPNGFix(imgData, false)
 }
 
-// ClassifyWithPNGFix performs OCR with optional PNG transparent background fix.
-// When pngFix is true, RGBA images are composited over a white background
-// before processing (matching Python's png_fix behavior).
+// ClassifyWithPNGFix 执行 OCR 识别，可选 PNG 透明背景修复。
+// pngFix 为 true 时，RGBA 图片会被合成到白色背景上再处理（对应 Python 版的 png_fix）。
 func (ocr *DdddOcr) ClassifyWithPNGFix(imgData []byte, pngFix bool) (string, error) {
 	if !ocr.initialized {
-		return "", fmt.Errorf("OCR engine not initialized")
+		return "", fmt.Errorf("OCR 引擎未初始化")
 	}
 
-	// Decode image
+	// 解码图片
 	img, err := decodeImage(imgData)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode image: %w", err)
+		return "", fmt.Errorf("图片解码失败: %w", err)
 	}
 
-	// Preprocess
+	// 预处理
 	inputData, height, width, err := preprocessWithPNGFix(img, pngFix)
 	if err != nil {
-		return "", fmt.Errorf("preprocessing failed: %w", err)
+		return "", fmt.Errorf("预处理失败: %w", err)
 	}
 
-	// Run inference
+	// 执行推理
 	outputData, seqLen, err := ocr.runInference(inputData, height, width)
 	if err != nil {
-		return "", fmt.Errorf("inference failed: %w", err)
+		return "", fmt.Errorf("推理失败: %w", err)
 	}
 
-	// CTC decode
+	// CTC 解码
 	numClasses := len(ocr.charset)
 	result := ctcDecode(outputData, seqLen, numClasses, ocr.charset)
 
 	return result, nil
 }
 
-// runInference creates ONNX tensors and runs the model.
+// runInference 创建 ONNX 张量并执行模型推理。
 func (ocr *DdddOcr) runInference(inputData []float32, height, width int) ([]float32, int, error) {
-	// Create input tensor (1, 1, 64, width)
+	// 创建输入张量 (1, 1, 64, width)
 	inputShape := ort.NewShape(1, 1, int64(height), int64(width))
 	inputTensor, err := ort.NewTensor(inputShape, inputData)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create input tensor: %w", err)
+		return nil, 0, fmt.Errorf("创建输入张量失败: %w", err)
 	}
 	defer inputTensor.Destroy()
 
-	// Create output tensor with exact sequence length
-	// seqLen = ceil(width / 8) — verified against actual model output
+	// 创建输出张量，序列长度 = ceil(width / 8)
 	seqLen := int64((width + 7) / 8)
 	if seqLen < 1 {
 		seqLen = 1
@@ -198,26 +195,26 @@ func (ocr *DdddOcr) runInference(inputData []float32, height, width int) ([]floa
 	outputShape := ort.NewShape(seqLen, 1, numClasses)
 	outputTensor, err := ort.NewEmptyTensor[float32](outputShape)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create output tensor: %w", err)
+		return nil, 0, fmt.Errorf("创建输出张量失败: %w", err)
 	}
 	defer outputTensor.Destroy()
 
-	// Run inference
+	// 执行推理
 	err = ocr.session.Run(
 		[]ort.Value{inputTensor},
 		[]ort.Value{outputTensor},
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ONNX inference failed: %w", err)
+		return nil, 0, fmt.Errorf("ONNX 推理失败: %w", err)
 	}
 
-	// Get output data
+	// 获取输出数据
 	outputData := outputTensor.GetData()
 
 	return outputData, int(seqLen), nil
 }
 
-// Close releases all resources used by the OCR engine.
+// Close 释放 OCR 引擎占用的所有资源。
 func (ocr *DdddOcr) Close() error {
 	if ocr.session != nil {
 		ocr.session.Destroy()
@@ -227,14 +224,14 @@ func (ocr *DdddOcr) Close() error {
 	return nil
 }
 
-// GetCharset returns the character set used by this OCR instance.
+// GetCharset 返回当前 OCR 实例使用的字符集。
 func (ocr *DdddOcr) GetCharset() []string {
 	result := make([]string, len(ocr.charset))
 	copy(result, ocr.charset)
 	return result
 }
 
-// IsInitialized returns whether the OCR engine is ready.
+// IsInitialized 返回 OCR 引擎是否已就绪。
 func (ocr *DdddOcr) IsInitialized() bool {
 	return ocr.initialized
 }
