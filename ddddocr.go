@@ -45,25 +45,29 @@ func initializeORT(libPath string) {
 	})
 }
 
-// Options 配置 OCR 引擎的参数。
+// Options 配置引擎的参数。
 type Options struct {
-	// Old 使用旧版模型 common_old.onnx（Beta 为 false 时的默认值）。
+	// Old 使用旧版 OCR 模型 common_old.onnx（默认）。
 	Old bool
-	// Beta 使用新版模型 common.onnx，优先级高于 Old。
+	// Beta 使用新版 OCR 模型 common.onnx，优先级高于 Old。
 	Beta bool
-	// ModelPath 自定义 ONNX 模型文件路径。设置后 Old/Beta 被忽略。
+	// Det 启用目标检测模式（使用 common_det.onnx）。
+	Det bool
+	// ModelPath 自定义 ONNX 模型文件路径。设置后 Old/Beta/Det 被忽略。
 	ModelPath string
-	// CharsetPath 自定义字符集 JSON 文件路径。
+	// CharsetPath 自定义字符集 JSON 文件路径（仅 OCR 模式）。
 	CharsetPath string
 	// OnnxRuntimeLibPath ONNX Runtime 动态库路径。为空时自动检测。
 	OnnxRuntimeLibPath string
 }
 
-// DdddOcr 是 OCR 识别引擎主体。
+// DdddOcr 是引擎主体，支持 OCR 识别和目标检测。
 type DdddOcr struct {
 	options     Options
 	charset     []string
-	session     *ort.DynamicAdvancedSession
+	session     *ort.DynamicAdvancedSession // OCR 模型会话
+	detSession  *ort.DynamicAdvancedSession // 检测模型会话
+	isDet       bool                        // 是否为检测模式
 	initialized bool
 }
 
@@ -82,6 +86,39 @@ func New(opts *Options) (*DdddOcr, error) {
 
 	ocr := &DdddOcr{
 		options: *opts,
+	}
+
+	// 检测模式
+	if opts.Det {
+		ocr.isDet = true
+
+		var modelData []byte
+		if opts.ModelPath != "" {
+			var err error
+			modelData, err = os.ReadFile(opts.ModelPath)
+			if err != nil {
+				return nil, fmt.Errorf("读取模型文件失败: %w", err)
+			}
+		} else {
+			modelData = commonDetOnnxData
+		}
+
+		if len(modelData) == 0 {
+			return nil, fmt.Errorf("检测模型数据为空")
+		}
+
+		session, err := ort.NewDynamicAdvancedSessionWithONNXData(
+			modelData,
+			[]string{"images"}, // 输入节点名
+			[]string{"output"}, // 输出节点名
+			nil,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("创建检测会话失败: %w", err)
+		}
+		ocr.detSession = session
+		ocr.initialized = true
+		return ocr, nil
 	}
 
 	// 确定字符集
@@ -214,11 +251,15 @@ func (ocr *DdddOcr) runInference(inputData []float32, height, width int) ([]floa
 	return outputData, int(seqLen), nil
 }
 
-// Close 释放 OCR 引擎占用的所有资源。
+// Close 释放引擎占用的所有资源。
 func (ocr *DdddOcr) Close() error {
 	if ocr.session != nil {
 		ocr.session.Destroy()
 		ocr.session = nil
+	}
+	if ocr.detSession != nil {
+		ocr.detSession.Destroy()
+		ocr.detSession = nil
 	}
 	ocr.initialized = false
 	return nil
