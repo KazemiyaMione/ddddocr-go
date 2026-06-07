@@ -13,6 +13,7 @@ package ddddocr
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -26,11 +27,19 @@ var (
 // initializeORT initializes ONNX Runtime. Safe to call multiple times.
 func initializeORT(libPath string) {
 	initOnce.Do(func() {
-		// Priority: 1) explicit path, 2) ONNXRUNTIME_LIB_PATH env var, 3) auto-detect
+		// Resolve relative path to absolute before passing to ONNX Runtime C API
+		resolvePath := func(p string) string {
+			abs, err := filepath.Abs(p)
+			if err == nil {
+				return abs
+			}
+			return p
+		}
+
 		if libPath != "" {
-			ort.SetSharedLibraryPath(libPath)
+			ort.SetSharedLibraryPath(resolvePath(libPath))
 		} else if envPath := os.Getenv("ONNXRUNTIME_LIB_PATH"); envPath != "" {
-			ort.SetSharedLibraryPath(envPath)
+			ort.SetSharedLibraryPath(resolvePath(envPath))
 		}
 		initErr = ort.InitializeEnvironment()
 	})
